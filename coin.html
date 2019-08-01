@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Coin Flip</title>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <div class="header" style="text-align: center">
+            <nav>
+                <ul class="nav nav-pills pull-right">
+                    <li role="presentation">
+                        <div class="btn-group">
+                            <button id="request-address" type="button" class="btn btn-default dropdown-toggle"
+                                data-toggle="dropdown" aria-expanded="false">
+                                로그인
+                            </button>
+                        </div>
+                    </li>
+                    <li role="presentation">
+                        <p id="response-address" class="navbar-text">wallet address</p>
+                    </li>
+                </ul>
+            </nav>
+            <h1>Coin Flip</h1>
+        </div>
+        <div class="container theme-showcase" role="main">
+            <div class="row">
+                <div class="col-md-6">
+                    <div id="front" style="display: block;">앞면</div>
+                    <div id="front-selected" style="display: none;">앞면</div>
+                </div>
+                <div class="col-md-6">
+                    <div id="back" style="display: block;">뒷면</div>
+                    <div id="back-selected" style="display: none;">뒷면</div>
+                </div>
+                <div class="col-md-12" style="width: 30%; margin: 20px; margin-left: 300px;">
+                    <input id="betvalue" type="number" class="form-control" placeholder="수량입력">
+                </div>
+                <div class="col-md-12" style="margin-left: 370px;">
+                    <h3>
+                        <p id="balance-remain">잔액: ICX</p>
+                    </h3>
+                </div>
+                <div class="col-md-12">
+                    <button id="request-score" type="button" class="btn btn-default" style="margin-left: 430px;">
+                        BET
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/gh/icon-project/icon-sdk-js@latest/build/icon-sdk-js.web.min.js"></script>
+    <script>
+        var IconService = window['icon-sdk-js']
+
+        const { HttpProvider, IconBuilder, IconWallet, IconAmount, IconConverter } = IconService
+        const provider = new HttpProvider('https://bicon.net.solidwallet.io/api/v3')
+        const iconService = new IconService(provider)
+
+        // var IconWallet = iconService.IconWallet
+        // var IconAmount = iconService.IconAmount
+        // var IconConverter = iconService.IconConverter
+        // var IconBuilder = iconService.IconBuilder
+
+        var front = document.getElementById("front")
+        var frontSelected = document.getElementById("front-selected")
+        var back = document.getElementById("back")
+        var backSelected = document.getElementById("back-selected")
+
+        var requestAddress = document.getElementById("request-address")
+        var responseAddress = document.getElementById("response-address")
+        var requestScore = document.getElementById("request-score")
+        var balanceRemain = document.getElementById("balance-remain")
+        var betvalue = document.getElementById("betvalue")
+
+        var coin = -1
+        var balance = undefined
+        var fromAddress = ''
+        var result = ''
+        var betresult = undefined
+
+        function getBalance() {
+            balance = iconService.getBalance(fromAddress).execute()
+            balance.then(values => {                
+                console.log(values)
+                balanceRemain.innerHTML = "잔액: " + values['c'][0] / 10000 + " ICX"
+            })
+        }
+        window.addEventListener("ICONEX_RELAY_RESPONSE", eventHandler, false);
+        function eventHandler(event) {
+            var type = event.detail.type
+            var payload = event.detail.payload
+            switch (type) {
+                case "RESPONSE_ADDRESS":
+                    fromAddress = payload
+                    responseAddress.innerHTML = payload;
+                    getBalance()
+                    break
+                case "RESPONSE_JSON-RPC":
+                    console.log(typeof payload.result)
+                    console.log(payload.result)
+                    var txRes = undefined
+                    setTimeout(function() {
+                        txRes = iconService.getTransactionResult(payload.result).execute()
+                        console.log(txRes)
+                    }, 1000)
+
+                    setTimeout(function () {
+                        txRes.then(values => {
+                            console.log(values)
+                            if (values['eventLogs'][1]) alert('You WIN')
+                            else if (values['eventLogs'][0]) alert('You LOSE')
+                            console.log(values['eventLogs'])
+                        }).catch((error) => {}) 
+                    }, 1000)
+                    getBalance()
+                    break
+                default:
+                    break
+            }
+        }
+
+        requestAddress.onclick = function () {
+            window.dispatchEvent(new CustomEvent('ICONEX_RELAY_REQUEST', {
+                detail: {
+                    type: 'REQUEST_ADDRESS'
+                }
+            }))
+        }
+
+        requestScore.onclick = async function () {
+            if (!fromAddress) {
+                alert('로그인을 해주세요.')
+                return
+            }
+
+            if (coin === -1) {
+                alert('동전의 앞면 혹은 뒷면을 선택해주세요.')
+                return
+            }
+
+            if (betvalue.value === '') {
+                alert('수량을 입력해주세요.')
+                return
+            }
+            console.log('before builder ')
+            var txObj = new IconBuilder.IcxTransactionBuilder()
+            var txObjData = txObj.from(fromAddress)
+                .to("cx807ec215c083f2e250c3befe6376d6da3e74e7b1")
+                .value(IconAmount.of(betvalue.value, IconAmount.Unit.ICX).toLoop())
+                .stepLimit(IconConverter.toBigNumber(1000000))
+                .nid(IconConverter.toBigNumber(3))
+                .nonce(IconConverter.toBigNumber(1))
+                .version(IconConverter.toBigNumber(3))
+                .timestamp((new Date()).getTime() * 1000)
+                .build()
+            txData = JSON.stringify({
+                "jsonrpc": "2.0",
+                "method": "icx_sendTransaction",
+                "params":
+                    IconConverter.toRawTransaction(txObjData),
+                "id": 50889
+            })
+            console.log('after builder')
+
+            var txParsed = JSON.parse(txData)
+            await window.dispatchEvent(new CustomEvent('ICONEX_RELAY_REQUEST', {
+                detail: {
+                    type: 'REQUEST_JSON-RPC',
+                    payload: txParsed
+                }
+            }))
+
+            console.log('after first transaction')
+            alert('sign again for betting.')            
+
+            var callTransactionBuilder = new IconBuilder.CallTransactionBuilder()
+            var callTransactionData = callTransactionBuilder
+                .from(fromAddress)
+                .to("cx807ec215c083f2e250c3befe6376d6da3e74e7b1")
+                .nid(IconConverter.toBigNumber('3'))
+                .nonce(IconConverter.toBigNumber('1'))
+                .timestamp((new Date()).getTime() * 1000)
+                .stepLimit(IconConverter.toBigNumber('10000000'))
+                .version(IconConverter.toBigNumber('3'))
+                .method('bet')
+                .params({
+                    bet: IconConverter.toBigNumber(coin)
+                })
+                .build()
+            scoreData = JSON.stringify({
+                "jsonrpc": "2.0",
+                "method": "icx_sendTransaction",
+                "params":
+                    IconConverter.toRawTransaction(callTransactionData),
+                "id": 1
+            })
+
+            console.log('after second builder')
+
+            var parsed = JSON.parse(scoreData)
+            await window.dispatchEvent(new CustomEvent('ICONEX_RELAY_REQUEST', {
+                detail: {
+                    type: 'REQUEST_JSON-RPC',
+                    payload: parsed
+                }
+            }))
+            console.log('after second transaction')
+            
+
+            /*window.addEventListener("ICONEX_RELAY_RESPONSE", handler, false);
+
+
+            async function handler(event) {
+                var type = event.detail.type
+                var payload = event.detail.payload
+                switch (type) {
+                    case 'REQUEST_JSON-RPC':
+                    case "RESPONSE_JSON-RPC":
+                        console.log(typeof payload.result)
+                        console.log(payload.result)
+                        txRes = iconService.getTransactionResult(payload.result).execute();
+                        console.log(txRes)
+
+                        txRes.then(values => {
+                            console.log(values)
+                            if (values['eventLogs'][1]) alert('You WIN')
+                            else if (values['eventLogs'][0]) alert('You Lose')
+                            console.log(values['eventLogs'])
+                        }).catch((error) => { alert('failed to load the result. please check the tx hash') })
+
+                        break
+                    default:
+                        break
+                }
+            }*/
+        }
+        front.onclick = function () {
+            front.style.display = 'none'
+            frontSelected.style.display = 'block'
+            back.style.display = 'block'
+            backSelected.style.display = 'none'
+            coin = 0
+        }
+
+        back.onclick = function () {
+            front.style.display = 'block'
+            frontSelected.style.display = 'none'
+            back.style.display = 'none'
+            backSelected.style.display = 'block'
+            coin = 1
+        }
+
+    </script>
+</body>
+
+</html>
+
+<style>
+    #front {
+        background-color: #dadada;
+        width: 200px;
+        height: 200px;
+        border-radius: 100px;
+        padding-top: 75px;
+        text-align: center;
+        font-size: 50px;
+        margin: 10px;
+        margin-left: 100px;
+    }
+
+    #front-selected {
+        background-color: black;
+        width: 200px;
+        height: 200px;
+        border-radius: 100px;
+        color: white;
+        padding-top: 75px;
+        text-align: center;
+        font-size: 50px;
+        margin: 10px;
+        margin-left: 100px;
+    }
+
+    #back {
+        background-color: #dadada;
+        width: 200px;
+        height: 200px;
+        border-radius: 100px;
+        padding-top: 75px;
+        text-align: center;
+        font-size: 50px;
+        margin: 10px;
+    }
+
+    #back-selected {
+        background-color: black;
+        width: 200px;
+        height: 200px;
+        border-radius: 100px;
+        color: white;
+        padding-top: 75px;
+        text-align: center;
+        font-size: 50px;
+        margin: 10px;
+    }
+</style>
